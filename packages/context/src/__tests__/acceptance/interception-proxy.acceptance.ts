@@ -60,6 +60,35 @@ describe('Interception proxy', () => {
       'log: after-greet',
       'convertName: after-greet',
     ]);
+
+    // Make sure `greet` always return Promise now
+    expect(proxy.greet('Jane')).to.be.instanceOf(Promise);
+  });
+
+  it('creates async methods for the proxy', () => {
+    class MyController {
+      name: string;
+
+      greet(name: string): string {
+        return `Hello, ${name}`;
+      }
+
+      async hello(name: string) {
+        return `Hello, ${name}`;
+      }
+    }
+
+    interface ExpectedAsyncProxyForMyController {
+      name: string;
+      greet(name: string): Promise<string>; // the return type becomes `Promise<string>`
+      hello(name: string): Promise<string>; // the same as MyController
+    }
+
+    const proxy = createProxyWithInterceptors(new MyController(), ctx);
+
+    // Enforce compile time check to ensure the AsyncProxy typing works for TS
+    // tslint:disable-next-line:no-unused
+    const check: ExpectedAsyncProxyForMyController = proxy;
   });
 
   it('invokes interceptors on a static method', async () => {

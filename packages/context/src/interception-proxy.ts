@@ -7,18 +7,18 @@ import {Context} from './context';
 import {InvocationArgs, invokeMethodWithInterceptors} from './interceptor';
 
 /**
- * The Promise type for `T`. If `T` extends `Promise`, the type is `T`,
+ * Create the Promise type for `T`. If `T` extends `Promise`, the type is `T`,
  * otherwise the type is `Promise<T>`.
  */
-export type PromiseType<T> = T extends Promise<unknown> ? T : Promise<T>;
+export type AsPromise<T> = T extends Promise<unknown> ? T : Promise<T>;
 
 /**
  * The async variant of a function to always return Promise<R>. If T is not a
  * function, the type is `T`.
  */
 // tslint:disable-next-line:no-unused (possible tslint bug to treat `R` as unused)
-export type AsyncType<T> = T extends (...args: InvocationArgs) => infer R
-  ? (...args: InvocationArgs) => PromiseType<R>
+export type AsAsyncFunction<T> = T extends (...args: InvocationArgs) => infer R
+  ? (...args: InvocationArgs) => AsPromise<R>
   : T;
 
 /**
@@ -49,7 +49,7 @@ export type AsyncType<T> = T extends (...args: InvocationArgs) => infer R
  * }
  * ```
  */
-export type AsyncProxy<T> = {[P in keyof T]: AsyncType<T[P]>};
+export type AsyncProxy<T> = {[P in keyof T]: AsAsyncFunction<T[P]>};
 
 /**
  * A proxy handler that applies interceptors
