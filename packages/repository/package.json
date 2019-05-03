@@ -31,7 +31,7 @@
     "@types/debug": "^4.1.4",
     "debug": "^4.0.1",
     "lodash": "^4.17.11",
-    "loopback-datasource-juggler": "^4.6.2"
+    "loopback-datasource-juggler": "^4.6.4"
   },
   "files": [
     "README.md",
