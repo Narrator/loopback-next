@@ -384,7 +384,16 @@ export class Binding<T = BoundValue> {
   private _setValueGetter(getValue: ValueGetter<T>) {
     // Clear the cache
     this._clearCache();
-    this._getValue = getValue;
+    this._getValue = (ctx: Context, options: ResolutionOptions) => {
+      if (options.asProxyWithInterceptors && this._type !== BindingType.CLASS) {
+        throw new Error(
+          `Binding '${this.key}' (${
+            this._type
+          }) does not support 'asProxyWithInterceptors'`,
+        );
+      }
+      return getValue(ctx, options);
+    };
   }
 
   /**

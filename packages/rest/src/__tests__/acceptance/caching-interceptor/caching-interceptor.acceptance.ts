@@ -23,14 +23,22 @@ describe('caching interceptor', () => {
   let client: Client;
   let app: RestApplication;
 
-  before(givenAClient);
-  after(async () => {
-    await app.stop();
-  });
-
   beforeEach(clearCache);
 
   context('as a binding key', () => {
+    class ControllerWithInterceptorBinding {
+      @intercept('caching-interceptor')
+      @get('/toUpperCase/{text}')
+      toUpperCase(@param.path.string('text') text: string) {
+        return text.toUpperCase();
+      }
+    }
+
+    before(givenAClient);
+    after(async () => {
+      await app.stop();
+    });
+
     it('invokes the controller method if not cached', async () => {
       await client.get('/toUpperCase/Hello').expect(200, 'HELLO');
       expect(status.returnFromCache).to.be.false();
@@ -43,9 +51,30 @@ describe('caching interceptor', () => {
         expect(status.returnFromCache).to.be.true();
       }
     });
+
+    async function givenAClient() {
+      app = new RestApplication({rest: givenHttpServerConfig()});
+      app.bind('caching-interceptor').toProvider(CachingInterceptorProvider);
+      app.controller(ControllerWithInterceptorBinding);
+      await app.start();
+      client = createRestAppClient(app);
+    }
   });
 
   context('as an interceptor function', () => {
+    class ControllerWithInterceptorFunction {
+      @intercept(cache)
+      @get('/toLowerCase/{text}')
+      toLowerCase(@param.path.string('text') text: string) {
+        return text.toLowerCase();
+      }
+    }
+
+    before(givenAClient);
+    after(async () => {
+      await app.stop();
+    });
+
     it('invokes the controller method if not cached', async () => {
       await client.get('/toLowerCase/Hello').expect(200, 'hello');
       expect(status.returnFromCache).to.be.false();
@@ -58,30 +87,12 @@ describe('caching interceptor', () => {
         expect(status.returnFromCache).to.be.true();
       }
     });
+
+    async function givenAClient() {
+      app = new RestApplication({rest: givenHttpServerConfig()});
+      app.controller(ControllerWithInterceptorFunction);
+      await app.start();
+      client = createRestAppClient(app);
+    }
   });
-
-  async function givenAClient() {
-    app = new RestApplication({rest: givenHttpServerConfig()});
-    app.bind('caching-interceptor').toProvider(CachingInterceptorProvider);
-    app.controller(StringCaseController);
-    await app.start();
-    client = createRestAppClient(app);
-  }
-
-  /**
-   * A controller using interceptors for caching
-   */
-  class StringCaseController {
-    @intercept('caching-interceptor')
-    @get('/toUpperCase/{text}')
-    toUpperCase(@param.path.string('text') text: string) {
-      return text.toUpperCase();
-    }
-
-    @intercept(cache)
-    @get('/toLowerCase/{text}')
-    toLowerCase(@param.path.string('text') text: string) {
-      return text.toLowerCase();
-    }
-  }
 });

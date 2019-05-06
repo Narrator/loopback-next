@@ -11,6 +11,7 @@ import {
   inject,
   intercept,
   Interceptor,
+  ValueOrPromise,
 } from '../..';
 
 describe('Interception proxy', () => {
@@ -80,7 +81,7 @@ describe('Interception proxy', () => {
 
     interface ExpectedAsyncProxyForMyController {
       name: string;
-      greet(name: string): Promise<string>; // the return type becomes `Promise<string>`
+      greet(name: string): ValueOrPromise<string>; // the return type becomes `Promise<string>`
       hello(name: string): Promise<string>; // the same as MyController
     }
 
@@ -133,6 +134,17 @@ describe('Interception proxy', () => {
       'log: after-greet',
       'convertName: after-greet',
     ]);
+  });
+
+  it('reports error when asProxyWithInterceptors is set for non-Class binding', async () => {
+    ctx.bind('my-value').toDynamicValue(() => 'my-value');
+    await expect(
+      ctx.get<string>('my-value', {
+        asProxyWithInterceptors: true,
+      }),
+    ).to.be.rejectedWith(
+      `Binding 'my-value' (DynamicValue) does not support 'asProxyWithInterceptors'`,
+    );
   });
 
   it('supports asProxyWithInterceptors resolution option for @inject', async () => {

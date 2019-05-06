@@ -5,25 +5,28 @@
 
 import {Context} from './context';
 import {InvocationArgs, invokeMethodWithInterceptors} from './interceptor';
+import {ValueOrPromise} from './value-promise';
 
 /**
  * Create the Promise type for `T`. If `T` extends `Promise`, the type is `T`,
- * otherwise the type is `Promise<T>`.
+ * otherwise the type is `ValueOrPromise<T>`.
  */
-export type AsPromise<T> = T extends Promise<unknown> ? T : Promise<T>;
+export type AsValueOrPromise<T> = T extends Promise<unknown>
+  ? T
+  : ValueOrPromise<T>;
 
 /**
- * The async variant of a function to always return Promise<R>. If T is not a
- * function, the type is `T`.
+ * The async variant of a function to always return `ValueOrPromise<R>`. If `T`
+ * is not a function, the type is `T`.
  */
 // tslint:disable-next-line:no-unused (possible tslint bug to treat `R` as unused)
 export type AsAsyncFunction<T> = T extends (...args: InvocationArgs) => infer R
-  ? (...args: InvocationArgs) => AsPromise<R>
+  ? (...args: InvocationArgs) => AsValueOrPromise<R>
   : T;
 
 /**
  * The proxy type for `T`. The return type for any method of `T` with original
- * return type `R` becomes `Promise<R>` if `R` does not extend `Promise`.
+ * return type `R` becomes `ValueOrPromise<R>` if `R` does not extend `Promise`.
  * Property types stay untouched. For example:
  *
  * ```ts
@@ -44,7 +47,7 @@ export type AsAsyncFunction<T> = T extends (...args: InvocationArgs) => infer R
  * ```ts
  * {
  *   name: string; // the same as MyController
- *   greet(name: string): Promise<string>; // the return type becomes `Promise<string>`
+ *   greet(name: string): ValueOrPromise<string>; // the return type becomes `ValueOrPromise<string>`
  *   hello(name: string): Promise<string>; // the same as MyController
  * }
  * ```

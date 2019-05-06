@@ -129,7 +129,7 @@ type:
 ```ts
 {
   name: string; // the same as MyController
-  greet(name: string): Promise<string>; // the return type becomes `Promise<string>`
+  greet(name: string): ValueOrPromise<string>; // the return type becomes `ValueOrPromise<string>`
   hello(name: string): Promise<string>; // the same as MyController
 }
 ```
@@ -154,6 +154,9 @@ let msg = await invokeMethod(MyController, 'greetStaticWithDI', ctx);
 const controller = new MyController();
 msg = await invokeMethod(controller, 'greetWithDI', ctx);
 ```
+
+Please note that `invokeMethod` internally uses `invokeMethodWithInterceptors`
+to support both injection of method parameters and application of interceptors.
 
 ## Apply interceptors
 
@@ -415,26 +418,56 @@ a binding that is resolved to an `Interceptor` function.
 
 ### Interceptor functions
 
-The interceptor function has the following signature:
+The interceptor function is invoked to intercept a method invocation with two
+parameters:
+
+- `context`: the [invocation context](#invocation-context)
+- `next`: a function to invoke next interceptor or the target method. It returns
+  a value or promise depending on whether downstream interceptors and the target
+  method are synchronous or asynchronous.
 
 ```ts
+/**
+ * Interceptor function to intercept method invocations
+ */
 export interface Interceptor {
-  <T = unknown>(
+  /**
+   * @param context Invocation context
+   * @param next A function to invoke next interceptor or the target method
+   * @returns A result as value or promise
+   */
+  (
     context: InvocationContext,
-    next: () => ValueOrPromise<T>,
-  ): ValueOrPromise<T>;
+    next: () => ValueOrPromise<InvocationResult>,
+  ): ValueOrPromise<InvocationResult>;
 }
 ```
 
-An interceptor can be synchronous (returning a value) or asynchronous (returning
-a promise). If one of the interceptors or the target method is asynchronous, the
-invocation will be asynchronous.
+An interceptor can be asynchronous (returning a promise) or synchronous
+(returning a value) or. If one of the interceptors or the target method is
+asynchronous, the invocation will be asynchronous. The following table show how
+the final return type is determined.
+
+| Interceptor | Target method | Return type |
+| ----------- | ------------- | ----------- |
+| async       | async         | promise     |
+| async       | sync          | promise     |
+| sync        | async         | promise     |
+| sync        | sync          | value       |
+
+To keep things simple and consistent, we recommend that interceptors function to
+be asynchronous as much as possible.
 
 ### Invocation context
 
 The `InvocationContext` object provides access to metadata for the given
 invocation in addition to the parent `Context` that can be used to locate other
-bindings.
+bindings. It extends `Context` with additional properties as follows:
+
+- `target` (`object`): Target class (for static methods) or prototype/object
+  (for instance methods)
+- `methodName` (`string`): Method name
+- `args` (`InvocationArgs`, i.e., `any[]`): An array of arguments
 
 ```ts
 /**
@@ -443,8 +476,9 @@ bindings.
 export class InvocationContext extends Context {
   /**
    * Construct a new instance
-   * @param parent Parent context
-   * @param target Target class or object
+   * @param parent Parent context, such as the RequestContext
+   * @param target Target class (for static methods) or prototype/object
+   * (for instance methods)
    * @param methodName Method name
    * @param args An array of arguments
    */
@@ -474,7 +508,7 @@ interceptor implementation looks like the following:
 ```ts
 async function intercept<T>(
   invocationCtx: InvocationContext,
-  next: () => Promise<T>,
+  next: () => ValueOrPromise<T>,
 ) {
   // Pre-process the request
   try {
@@ -489,29 +523,15 @@ async function intercept<T>(
 ```
 
 If `next()` is not invoked, neither downstream interceptors nor the target
-method be executed. It's valid to skip `next()` if by intention, for example, an
-interceptor can fail the invocation early due to validation errors or return a
-response from cache without invoking the target method.
+method be executed. It's valid to skip `next()` if it's by intention, for
+example, an interceptor can fail the invocation early due to validation errors
+or return a response from cache without invoking the target method.
 
 ### Example interceptors
 
 Here are some example interceptor functions:
 
-1. A synchronous interceptor to log method invocations:
-
-```ts
-const logSync: Interceptor = (invocationCtx, next) => {
-  console.log('logSync: before-' + invocationCtx.methodName);
-  // Calling `next()` without `await`
-  const result = next();
-  // It's possible that the statement below is executed before downstream
-  // interceptors or the target method finish
-  console.log('logSync: after-' + invocationCtx.methodName);
-  return result;
-};
-```
-
-2. An asynchronous interceptor to log method invocations:
+1. An asynchronous interceptor to log method invocations:
 
 ```ts
 const log: Interceptor = async (invocationCtx, next) => {
@@ -523,7 +543,7 @@ const log: Interceptor = async (invocationCtx, next) => {
 };
 ```
 
-3. An interceptor to catch and log errors:
+2. An interceptor to catch and log errors:
 
 ```ts
 const logError: Interceptor = async (invocationCtx, next) => {
@@ -539,7 +559,7 @@ const logError: Interceptor = async (invocationCtx, next) => {
 };
 ```
 
-4. An interceptor to convert `name` arg to upper case:
+3. An interceptor to convert `name` arg to upper case:
 
 ```ts
 const convertName: Interceptor = async (invocationCtx, next) => {
@@ -551,7 +571,7 @@ const convertName: Interceptor = async (invocationCtx, next) => {
 };
 ```
 
-5. An provider class for an interceptor that performs parameter validation
+4. An provider class for an interceptor that performs parameter validation
 
 To leverage dependency injection, a provider class can be defined as the
 interceptor:
@@ -583,4 +603,18 @@ class NameValidator implements Provider<Interceptor> {
     return await next();
   }
 }
+```
+
+5. A synchronous interceptor to log method invocations:
+
+```ts
+const logSync: Interceptor = (invocationCtx, next) => {
+  console.log('logSync: before-' + invocationCtx.methodName);
+  // Calling `next()` without `await`
+  const result = next();
+  // It's possible that the statement below is executed before downstream
+  // interceptors or the target method finish
+  console.log('logSync: after-' + invocationCtx.methodName);
+  return result;
+};
 ```
