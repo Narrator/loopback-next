@@ -451,7 +451,7 @@ describe('Interceptor', () => {
       ctx
         .bind('globalLog')
         .to(globalLog)
-        .apply(asGlobalInterceptor);
+        .apply(asGlobalInterceptor());
     }
   });
 

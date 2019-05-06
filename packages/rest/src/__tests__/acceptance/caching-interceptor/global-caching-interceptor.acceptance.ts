@@ -98,7 +98,7 @@ describe('global caching interceptor', () => {
     app
       .bind('caching-interceptor')
       .toProvider(CachingInterceptorProvider)
-      .apply(asGlobalInterceptor);
+      .apply(asGlobalInterceptor());
     app.controller(StringCaseController);
     app.route(
       'get',

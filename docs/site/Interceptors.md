@@ -410,6 +410,37 @@ Let's examine the list of interceptors invoked for each method on
 
    Interceptors to apply: [`convertName`, `log`]
 
+Global interceptors are invoked before class/method level ones unless they are
+explicitly overridden by `@intercept`.
+
+Global interceptors can be sorted as follows:
+
+1. Tag global interceptor binding with `ContextTags.GLOBAL_INTERCEPTOR_GROUP`.
+   The tag value will be treated as the `group` name of the interceptor. For
+   example:
+
+   ```ts
+   app
+     .bind('globalInterceptors.authInterceptor')
+     .to(authInterceptor)
+     .apply(asGlobalInterceptor('auth'));
+   ```
+
+   If the group tag does not exist, the value is default to `''`.
+
+2. Control the ordered groups for global interceptors
+
+   ```ts
+   app
+     .bind(ContextBindings.GLOBAL_INTERCEPTOR_ORDERED_GROUPS)
+     .to(['log', 'auth']);
+   ```
+
+If ordered groups is not bound to
+`ContextBindings.GLOBAL_INTERCEPTOR_ORDERED_GROUPS`, global interceptors will be
+sorted by their group names alphabetically. Interceptors with unknown groups are
+invoked before those listed in ordered groups.
+
 ## Create your own interceptors
 
 Interceptors can be made available by LoopBack itself, extension modules, or

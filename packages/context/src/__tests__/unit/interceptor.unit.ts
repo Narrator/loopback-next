@@ -4,7 +4,15 @@
 // License text available at https://opensource.org/licenses/MIT
 
 import {expect} from '@loopback/testlab';
-import {InterceptorOrKey, mergeInterceptors} from '../..';
+import {
+  asGlobalInterceptor,
+  Context,
+  ContextBindings,
+  Interceptor,
+  InterceptorOrKey,
+  InvocationContext,
+  mergeInterceptors,
+} from '../..';
 
 describe('mergeInterceptors', () => {
   it('removes duplicate entries from the spec', () => {
@@ -29,5 +37,120 @@ describe('mergeInterceptors', () => {
     expect(
       mergeInterceptors(interceptorsFromSpec, existingInterceptors),
     ).to.eql(expectedResult);
+  }
+});
+
+describe('globalInterceptors', () => {
+  let ctx: Context;
+
+  const logInterceptor: Interceptor = async (context, next) => {
+    await next();
+  };
+  const authInterceptor: Interceptor = async (context, next) => {
+    await next();
+  };
+
+  beforeEach(givenContext);
+
+  it('sorts by group', () => {
+    ctx
+      .bind(ContextBindings.GLOBAL_INTERCEPTOR_ORDERED_GROUPS)
+      .to(['log', 'auth']);
+
+    ctx
+      .bind('globalInterceptors.authInterceptor')
+      .to(authInterceptor)
+      .apply(asGlobalInterceptor('auth'));
+
+    ctx
+      .bind('globalInterceptors.logInterceptor')
+      .to(logInterceptor)
+      .apply(asGlobalInterceptor('log'));
+
+    const invocationCtx = givenInvocationContext();
+
+    const keys = invocationCtx.getGlobalInterceptorBindingKeys();
+    expect(keys).to.eql([
+      'globalInterceptors.logInterceptor',
+      'globalInterceptors.authInterceptor',
+    ]);
+  });
+
+  it('sorts by group - unknown group comes before known ones', () => {
+    ctx
+      .bind(ContextBindings.GLOBAL_INTERCEPTOR_ORDERED_GROUPS)
+      .to(['log', 'auth']);
+
+    ctx
+      .bind('globalInterceptors.authInterceptor')
+      .to(authInterceptor)
+      .apply(asGlobalInterceptor('auth'));
+
+    ctx
+      .bind('globalInterceptors.logInterceptor')
+      .to(logInterceptor)
+      .apply(asGlobalInterceptor('unknown'));
+
+    const invocationCtx = givenInvocationContext();
+
+    const keys = invocationCtx.getGlobalInterceptorBindingKeys();
+    expect(keys).to.eql([
+      'globalInterceptors.logInterceptor',
+      'globalInterceptors.authInterceptor',
+    ]);
+  });
+
+  it('sorts by group alphabetically without ordered group', () => {
+    ctx
+      .bind('globalInterceptors.authInterceptor')
+      .to(authInterceptor)
+      .apply(asGlobalInterceptor('auth'));
+
+    ctx
+      .bind('globalInterceptors.logInterceptor')
+      .to(logInterceptor)
+      .apply(asGlobalInterceptor('log'));
+
+    const invocationCtx = givenInvocationContext();
+
+    const keys = invocationCtx.getGlobalInterceptorBindingKeys();
+    expect(keys).to.eql([
+      'globalInterceptors.authInterceptor',
+      'globalInterceptors.logInterceptor',
+    ]);
+  });
+
+  it('sorts by binding order without group tags', () => {
+    ctx
+      .bind('globalInterceptors.authInterceptor')
+      .to(authInterceptor)
+      .apply(asGlobalInterceptor());
+
+    ctx
+      .bind('globalInterceptors.logInterceptor')
+      .to(logInterceptor)
+      .apply(asGlobalInterceptor());
+
+    const invocationCtx = givenInvocationContext();
+
+    const keys = invocationCtx.getGlobalInterceptorBindingKeys();
+    expect(keys).to.eql([
+      'globalInterceptors.authInterceptor',
+      'globalInterceptors.logInterceptor',
+    ]);
+  });
+
+  class MyController {
+    greet(name: string) {
+      return `Hello, ${name}`;
+    }
+  }
+
+  function givenContext() {
+    ctx = new Context();
+  }
+
+  function givenInvocationContext() {
+    return new InvocationContext(ctx, new MyController(), 'greet', ['John']);
   }
 });

@@ -13,11 +13,11 @@ import {
 } from '@loopback/metadata';
 import * as assert from 'assert';
 import * as debugFactory from 'debug';
-import {Binding} from './binding';
+import {Binding, BindingTemplate} from './binding';
 import {filterByTag} from './binding-filter';
 import {BindingAddress} from './binding-key';
 import {Context} from './context';
-import {ContextTags} from './keys';
+import {ContextBindings, ContextTags} from './keys';
 import {transformValueOrPromise, ValueOrPromise} from './value-promise';
 const debug = debugFactory('loopback:context:interceptor');
 const getTargetName = DecoratorFactory.getTargetName;
@@ -68,9 +68,107 @@ export class InvocationContext extends Context {
    * ContextTags.GLOBAL_INTERCEPTOR)
    */
   getGlobalInterceptorBindingKeys(): string[] {
-    return this.find(filterByTag(ContextTags.GLOBAL_INTERCEPTOR)).map(
-      b => b.key,
+    const bindings: Readonly<Binding<Interceptor>>[] = this.find(
+      filterByTag(ContextTags.GLOBAL_INTERCEPTOR),
     );
+    this.sortGlobalInterceptorBindings(bindings);
+    return bindings.map(b => b.key);
+  }
+
+  /**
+   * Sort global interceptor bindings by `globalInterceptorGroup` tags
+   * @param bindings An array of global interceptor bindings
+   */
+  private sortGlobalInterceptorBindings(
+    bindings: Readonly<Binding<Interceptor>>[],
+  ) {
+    // Get predefined ordered groups for global interceptors
+    const orderedGroups =
+      this.getSync(ContextBindings.GLOBAL_INTERCEPTOR_ORDERED_GROUPS, {
+        optional: true,
+      }) || [];
+    bindings.sort((a, b) => {
+      const g1: string = a.tagMap[ContextTags.GLOBAL_INTERCEPTOR_GROUP] || '';
+      const g2: string = b.tagMap[ContextTags.GLOBAL_INTERCEPTOR_GROUP] || '';
+      const i1 = orderedGroups.indexOf(g1);
+      const i2 = orderedGroups.indexOf(g2);
+      if (i1 !== -1 || i2 !== -1) {
+        // Honor the group order
+        return i1 - i2;
+      } else {
+        // Neither group is in the pre-defined order
+        // Use alphabetical order instead so that `1-group` is invoked before
+        // `2-group`
+        return g1 < g2 ? -1 : g1 > g2 ? 1 : 0;
+      }
+    });
+  }
+
+  /**
+   * Load all interceptors for the given invocation context. It adds
+   * interceptors from possibly three sources:
+   * 1. method level `@intercept`
+   * 2. class level `@intercept`
+   * 3. global interceptors discovered in the context
+   */
+  loadInterceptors() {
+    let interceptors =
+      MetadataInspector.getMethodMetadata(
+        INTERCEPT_METHOD_KEY,
+        this.target,
+        this.methodName,
+      ) || [];
+    const targetClass =
+      typeof this.target === 'function' ? this.target : this.target.constructor;
+    const classInterceptors =
+      MetadataInspector.getClassMetadata(INTERCEPT_CLASS_KEY, targetClass) ||
+      [];
+    // Inserting class level interceptors before method level ones
+    interceptors = mergeInterceptors(classInterceptors, interceptors);
+    const globalInterceptors = this.getGlobalInterceptorBindingKeys();
+    // Inserting global interceptors
+    interceptors = mergeInterceptors(globalInterceptors, interceptors);
+    return interceptors;
+  }
+
+  /**
+   * Assert the method exists on the target. An error will be thrown if otherwise.
+   * @param context Invocation context
+   */
+  assertMethodExists() {
+    const targetWithMethods = this.target as Record<string, Function>;
+    if (typeof targetWithMethods[this.methodName] !== 'function') {
+      const targetName = getTargetName(this.target, this.methodName);
+      assert(false, `Method ${targetName} not found`);
+    }
+    return targetWithMethods;
+  }
+
+  /**
+   * Invoke the target method with the given context
+   * @param context Invocation context
+   */
+  invokeTargetMethod() {
+    const targetWithMethods = this.assertMethodExists();
+    /* istanbul ignore if */
+    if (debug.enabled) {
+      debug(
+        'Invoking method %s',
+        getTargetName(this.target, this.methodName),
+        this.args,
+      );
+    }
+    // Invoke the target method
+    const result = targetWithMethods[this.methodName](...this.args);
+    /* istanbul ignore if */
+    if (debug.enabled) {
+      debug(
+        'Method invoked: %s',
+        getTargetName(this.target, this.methodName),
+        result,
+      );
+    }
+    return result;
   }
 }
 
@@ -79,8 +177,13 @@ export class InvocationContext extends Context {
  * by tagging it with `ContextTags.INTERCEPTOR`
  * @param binding Binding object
  */
-export function asGlobalInterceptor(binding: Binding<unknown>) {
-  return binding.tag(ContextTags.GLOBAL_INTERCEPTOR);
+export function asGlobalInterceptor(
+  group?: string,
+): BindingTemplate<Interceptor> {
+  return binding => {
+    binding.tag(ContextTags.GLOBAL_INTERCEPTOR);
+    if (group) binding.tag({[ContextTags.GLOBAL_INTERCEPTOR_GROUP]: group});
+  };
 }
 
 /**
@@ -261,83 +364,13 @@ export function invokeMethodWithInterceptors(
     args,
   );
 
-  assertMethodExists(invocationCtx);
+  invocationCtx.assertMethodExists();
   try {
-    const interceptors = loadInterceptors(invocationCtx);
+    const interceptors = invocationCtx.loadInterceptors();
     return invokeInterceptors(invocationCtx, interceptors);
   } finally {
     invocationCtx.close();
   }
-}
-
-/**
- * Load all interceptors for the given invocation context. It adds
- * interceptors from possibly three sources:
- * 1. method level `@intercept`
- * 2. class level `@intercept`
- * 3. global interceptors discovered in the context
- *
- * @param invocationCtx Invocation context
- */
-function loadInterceptors(invocationCtx: InvocationContext) {
-  let interceptors =
-    MetadataInspector.getMethodMetadata(
-      INTERCEPT_METHOD_KEY,
-      invocationCtx.target,
-      invocationCtx.methodName,
-    ) || [];
-  const targetClass =
-    typeof invocationCtx.target === 'function'
-      ? invocationCtx.target
-      : invocationCtx.target.constructor;
-  const classInterceptors =
-    MetadataInspector.getClassMetadata(INTERCEPT_CLASS_KEY, targetClass) || [];
-  // Inserting class level interceptors before method level ones
-  interceptors = mergeInterceptors(classInterceptors, interceptors);
-  const globalInterceptors = invocationCtx.getGlobalInterceptorBindingKeys();
-  // Inserting global interceptors
-  interceptors = mergeInterceptors(globalInterceptors, interceptors);
-  return interceptors;
-}
-
-/**
- * Invoke the target method with the given context
- * @param context Invocation context
- */
-function invokeTargetMethod(context: InvocationContext) {
-  const targetWithMethods = assertMethodExists(context);
-  /* istanbul ignore if */
-  if (debug.enabled) {
-    debug(
-      'Invoking method %s',
-      getTargetName(context.target, context.methodName),
-      context.args,
-    );
-  }
-  // Invoke the target method
-  const result = targetWithMethods[context.methodName](...context.args);
-  /* istanbul ignore if */
-  if (debug.enabled) {
-    debug(
-      'Method invoked: %s',
-      getTargetName(context.target, context.methodName),
-      result,
-    );
-  }
-  return result;
-}
-
-/**
- * Assert the method exists on the target. An error will be thrown if otherwise.
- * @param context Invocation context
- */
-function assertMethodExists(context: InvocationContext) {
-  const targetWithMethods = context.target as Record<string, Function>;
-  if (typeof targetWithMethods[context.methodName] !== 'function') {
-    const targetName = getTargetName(context.target, context.methodName);
-    assert(false, `Method ${targetName} not found`);
-  }
-  return targetWithMethods;
 }
 
 /**
@@ -358,7 +391,7 @@ function invokeInterceptors(
   function next(): ValueOrPromise<InvocationResult> {
     // No more interceptors
     if (index === interceptors.length) {
-      return invokeTargetMethod(context);
+      return context.invokeTargetMethod();
     }
     return invokeNextInterceptor();
   }
